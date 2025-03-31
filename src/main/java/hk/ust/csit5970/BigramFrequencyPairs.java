@@ -50,9 +50,24 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 			String line = ((Text) value).toString();
 			String[] words = line.trim().split("\\s+");
 			
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+		
+			if (words.length < 2) return;  
+            
+            for (int i = 0; i < words.length - 1; i++) {  
+                // 对于每个二元组 (a,b)，我们需要发出两种类型的键值对：  
+                // 1. 二元组本身，值为1: ((a,b), 1)  
+                // 2. 左词加特殊标记，用于计算总频次: ((a,*), 1)  
+                
+                if (words[i].length() == 0 || words[i+1].length() == 0) continue;  
+                
+                // 发出二元组 (a,b)  
+                BIGRAM.set(words[i], words[i+1]);  
+                context.write(BIGRAM, ONE);  
+                
+                // 发出左词的总频次计数 (a,*)  
+                BIGRAM.set(words[i], "");  
+                context.write(BIGRAM, ONE);  
+            }  
 		}
 	}
 
@@ -64,6 +79,7 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 
 		// Reuse objects.
 		private final static FloatWritable VALUE = new FloatWritable();
+		private int marginal = 0; 
 
 		@Override
 		public void reduce(PairOfStrings key, Iterable<IntWritable> values,
@@ -71,6 +87,31 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+
+			// 检查是否是左侧词的总频次计数  
+            if (key.getRightElement().equals("")) {  
+                // 累加该左侧词的总出现次数  
+                marginal = 0;  
+                for (IntWritable value : values) {  
+                    marginal += value.get();  
+                }  
+                
+                // 输出左侧词的总出现次数  
+                VALUE.set((float) marginal);  
+                context.write(key, VALUE);  
+            } else {  
+                // 计算特定二元组的出现次数  
+                int count = 0;  
+                for (IntWritable value : values) {  
+                    count += value.get();  
+                }  
+                
+                // 若左侧词的总频次已知，计算相对频率  
+                if (marginal > 0) {  
+                    VALUE.set((float) count / marginal);  
+                    context.write(key, VALUE);  
+                }  
+            }  
 		}
 	}
 	
@@ -84,6 +125,13 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			// 在 Combiner 中，我们只需要将相同键的计数值相加  
+            int sum = 0;  
+            for (IntWritable value : values) {  
+                sum += value.get();  
+            }  
+            SUM.set(sum);  
+            context.write(key, SUM);  
 		}
 	}
 
@@ -200,3 +248,4 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 		ToolRunner.run(new BigramFrequencyPairs(), args);
 	}
 }
+

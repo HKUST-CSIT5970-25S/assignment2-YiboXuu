@@ -37,7 +37,8 @@ import java.util.HashMap;
  */
 public class CORPairs extends Configured implements Tool {
 	private static final Logger LOG = Logger.getLogger(CORPairs.class);
-
+	private final static IntWritable ONE = new IntWritable(1);  
+    private final static Text WORD = new Text();  
 	/*
 	 * TODO: Write your first-pass Mapper here.
 	 */
@@ -52,7 +53,14 @@ public class CORPairs extends Configured implements Tool {
 			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
 			/*
 			 * TODO: Your implementation goes here.
-			 */
+			 */ 
+            while (doc_tokenizer.hasMoreTokens()) {  
+                String token = doc_tokenizer.nextToken();  
+                if (token.length() > 0) {  
+                    WORD.set(token);  
+                    context.write(WORD, ONE);  
+                }  
+            }  
 		}
 	}
 
@@ -61,11 +69,19 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	private static class CORReducer1 extends
 			Reducer<Text, IntWritable, Text, IntWritable> {
+
+		private final static IntWritable total = new IntWritable();  
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;  
+            for (IntWritable value : values) {  
+                sum += value.get();  
+            }  
+            total.set(sum);  
+            context.write(key, total);  
 		}
 	}
 
@@ -74,6 +90,10 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
+		
+		private final static IntWritable ONE = new IntWritable(1);  
+		private final static PairOfStrings BIGRAM = new PairOfStrings();  
+		
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
@@ -81,6 +101,33 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			    // 收集文档中的所有单词  
+			Set<String> sorted_word_set = new TreeSet<String>();  
+			while (doc_tokenizer.hasMoreTokens()) {  
+				String token = doc_tokenizer.nextToken();  
+				if (token.length() > 0) {  
+					sorted_word_set.add(token);  
+				}  
+			}  
+			
+			// 将单词存入列表以便访问  
+			List<String> wordList = new ArrayList<String>(sorted_word_set);  
+			
+			// 生成所有可能的单词对组合，确保字母顺序小的单词在前  
+			for (int i = 0; i < wordList.size(); i++) {  
+				for (int j = i + 1; j < wordList.size(); j++) {  
+					String wordA = wordList.get(i);  
+					String wordB = wordList.get(j);  
+					
+					// 确保字母顺序小的单词在前  
+					if (wordA.compareTo(wordB) < 0) {  
+						BIGRAM.set(wordA, wordB);  
+					} else {  
+						BIGRAM.set(wordB, wordA);  
+					}  
+					context.write(BIGRAM, ONE);  
+				}  
+			} 
 		}
 	}
 
@@ -88,11 +135,21 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Combiner here.
 	 */
 	private static class CORPairsCombiner2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, IntWritable> {
+		
+		private IntWritable SUM = new IntWritable();   
+
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			 // 合并计数  
+            int sum = 0;  
+            for (IntWritable value : values) {  
+                sum += value.get();  
+            }  
+            SUM.set(sum);  
+            context.write(key, SUM);  
 		}
 	}
 
@@ -102,6 +159,10 @@ public class CORPairs extends Configured implements Tool {
 	public static class CORPairsReducer2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, DoubleWritable> {
 		private final static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
 
+
+		private final static DoubleWritable VALUE = new DoubleWritable();  
+		private Configuration conf;  
+        private Path freqPath;   
 		/*
 		 * Preload the middle result file.
 		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
@@ -144,8 +205,49 @@ public class CORPairs extends Configured implements Tool {
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
-			 */
+			 */ // 计算二元组出现次数  
+    		  // 计算二元组出现次数  
+				int freqAB = 0;  
+				for (IntWritable value : values) {  
+					freqAB += value.get();  
+				}  
+				
+				// 获取两个单词的单独频率  
+				String wordA = key.getLeftElement();  
+				String wordB = key.getRightElement();  
+				
+				Integer freqA = word_total_map.get(wordA);  
+				Integer freqB = word_total_map.get(wordB);  
+				
+				// 计算相关系数 COR(A,B) = Freq(A,B) / (Freq(A) * Freq(B))  
+				if (freqA != null && freqB != null && freqA > 0 && freqB > 0) {  
+					double correlation = (double) freqAB / (freqA * freqB);  
+					VALUE.set(correlation);  
+					context.write(key, VALUE);  
+				}   
+			 
 		}
+
+		private int getWordCount(String word) {  
+            try {  
+                FileSystem fs = FileSystem.get(conf);  
+                FSDataInputStream fis = fs.open(freqPath);  
+                BufferedReader reader = new BufferedReader(new InputStreamReader(fis));  
+                
+                String line;  
+                while ((line = reader.readLine()) != null) {  
+                    String[] parts = line.split("\\s+");  
+                    if (parts.length >= 2 && parts[0].equals(word)) {  
+                        reader.close();  
+                        return Integer.parseInt(parts[1]);  
+                    }  
+                }  
+                reader.close();  
+            } catch (Exception e) {  
+                LOG.error("Error reading word count: " + e.getMessage());  
+            }  
+            return 0;  
+        }  
 	}
 
 	private static final class MyPartitioner extends Partitioner<PairOfStrings, FloatWritable> {

@@ -54,6 +54,21 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			 if (words.length < 2) return;  
+            
+            for (int i = 0; i < words.length - 1; i++) {  
+                if (words[i].length() == 0 || words[i+1].length() == 0) continue;  
+                
+                // 将左侧词作为键  
+                KEY.set(words[i]);  
+                
+                // 为这个左侧词创建一个"条纹"，包含右侧词及其计数为1  
+                STRIPE.clear();  
+                STRIPE.increment(words[i+1]);  
+                
+                // 输出 <左侧词, {右侧词: 计数}> 对  
+                context.write(KEY, STRIPE);  
+            }  
 		}
 	}
 
@@ -75,6 +90,32 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			 // 合并所有条纹（stripes）  
+            HashMapStringIntWritable combinedStripe = new HashMapStringIntWritable();  
+            
+            for (HashMapStringIntWritable stripe : stripes) {  
+                for (Map.Entry<String, Integer> entry : stripe.entrySet()) {  
+                    combinedStripe.increment(entry.getKey(), entry.getValue());  
+                }  
+            }  
+            
+            // 计算左侧词的总频次  
+            int totalCount = 0;  
+            for (int count : combinedStripe.values()) {  
+                totalCount += count;  
+            }  
+            
+            // 首先输出左侧词的总频次  
+            BIGRAM.set(key.toString(), "");  
+            FREQ.set((float) totalCount);  
+            context.write(BIGRAM, FREQ);  
+            
+            // 然后输出每个二元组的相对频率  
+            for (Map.Entry<String, Integer> entry : combinedStripe.entrySet()) {  
+                BIGRAM.set(key.toString(), entry.getKey());  
+                FREQ.set((float) entry.getValue() / totalCount);  
+                context.write(BIGRAM, FREQ);  
+            }  
 		}
 	}
 
@@ -94,6 +135,18 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+
+			 // 合并所有来自同一个键的条纹  
+            HashMapStringIntWritable combinedStripe = new HashMapStringIntWritable();  
+            
+            for (HashMapStringIntWritable stripe : stripes) {  
+                for (Map.Entry<String, Integer> entry : stripe.entrySet()) {  
+                    combinedStripe.increment(entry.getKey(), entry.getValue());  
+                }  
+            }  
+            
+            // 输出合并后的条纹  
+            context.write(key, combinedStripe);  
 		}
 	}
 
@@ -196,3 +249,4 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 		ToolRunner.run(new BigramFrequencyStripes(), args);
 	}
 }
+
